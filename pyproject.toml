@@ -1,0 +1,42 @@
+[project]
+name = "mcp-speech-to-text"
+version = "1.0.0"
+description = "MCP server for Speech-to-Text functionality"
+authors = [
+    {name = "Michael Yu", email = "michael@example.com"}
+]
+dependencies = [
+    "mcp>=1.0.0",
+    "speechrecognition>=3.10.0",
+    "pyaudio>=0.2.11",
+    "pydub>=0.25.1",
+    "openai-whisper>=20231117",
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "ffmpeg-python>=0.2.0",
+]
+readme = "README.md"
+license = {text = "MIT"}
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+mcp-speech-to-text = "mcp_speech_to_text.server:main"

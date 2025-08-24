@@ -1,0 +1,25 @@
+# MCP Speech-to-Text Requirements
+# Generated from pyproject.toml for pip compatibility
+
+# MCP Framework
+mcp>=1.0.0
+
+# AI/ML Dependencies
+openai-whisper>=20240930
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Audio Processing
+SpeechRecognition>=3.10.0
+PyAudio>=0.2.11
+pydub>=0.25.1
+
+# System Dependencies
+# Note: The following system packages are required:
+# - ffmpeg (for audio processing)
+# - portaudio19-dev (for PyAudio)
+# - python3-dev (for compilation)
+# - build-essential (for C++ compilation)
+
+# Install with: pip install -r requirements.txt
+# Or use uv (recommended): uv pip install -r requirements.txt

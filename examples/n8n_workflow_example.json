@@ -1,0 +1,106 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "http://localhost:8000/tools/call",
+        "options": {
+          "bodyContentType": "json"
+        },
+        "jsonData": "{\n  \"name\": \"transcribe_audio\",\n  \"arguments\": {\n    \"audio_file_path\": \"{{ $json.audio_file_path }}\",\n    \"language\": \"auto\",\n    \"model_size\": \"base\"\n  }\n}"
+      },
+      "name": "Transcribe Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [820, 240]
+    },
+    {
+      "parameters": {
+        "mode": "manual"
+      },
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [620, 240]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "audio_file_path",
+              "name": "audio_file_path",
+              "value": "/app/audio/sample.wav",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Audio Path",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [720, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process the transcription result\nconst result = $input.first().json;\n\nif (result.error) {\n  throw new Error(`Transcription failed: ${result.error}`);\n}\n\n// Parse the transcription result\nconst transcriptionData = JSON.parse(result.content[0].text);\n\nreturn {\n  transcription: transcriptionData.transcription,\n  detected_language: transcriptionData.detected_language,\n  model_used: transcriptionData.model_used,\n  file_path: transcriptionData.file_path,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "name": "Process Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 240]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Audio Path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Audio Path": {
+      "main": [
+        [
+          {
+            "node": "Transcribe Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe Audio": {
+      "main": [
+        [
+          {
+            "node": "Process Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "createdAt": "2025-01-01T00:00:00.000Z",
+  "id": "mcp-speech-to-text-example",
+  "meta": {},
+  "name": "MCP Speech-to-Text Example",
+  "staticData": {},
+  "tags": [
+    {
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "id": "mcp-tools",
+      "name": "MCP Tools",
+      "updatedAt": "2025-01-01T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}
