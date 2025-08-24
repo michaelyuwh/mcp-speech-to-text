@@ -1,0 +1,131 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install uv
+        uv pip install --system -e .
+    
+    - name: Run tests
+      run: |
+        python test_functionality.py
+        python comprehensive_test.py
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+
+  release:
+    needs: [test, build-and-push]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: Release ${{ github.ref_name }}
+        body: |
+          ## MCP Speech-to-Text Server ${{ github.ref_name }}
+          
+          ### 🚀 Quick Start
+          ```bash
+          docker run --rm -i \
+            -v $(pwd)/audio:/app/audio \
+            ghcr.io/michaelyuwh/mcp-speech-to-text:${{ github.ref_name }} \
+            python -m mcp_speech_to_text.server
+          ```
+          
+          ### 🔗 n8n Integration
+          Add to your n8n MCP configuration:
+          ```json
+          {
+            "mcpServers": {
+              "speech-to-text": {
+                "command": "docker",
+                "args": [
+                  "run", "--rm", "-i",
+                  "-v", "/path/to/audio:/app/audio",
+                  "ghcr.io/michaelyuwh/mcp-speech-to-text:${{ github.ref_name }}",
+                  "python", "-m", "mcp_speech_to_text.server"
+                ]
+              }
+            }
+          }
+          ```
+          
+          ### ✨ Features
+          - 🧠 OpenAI Whisper integration
+          - 🌍 Multi-language support (99+ languages)
+          - 📁 7 audio formats supported
+          - 🐳 Docker ready
+          - 🔗 n8n MCP integration
+          
+          See the [README](https://github.com/michaelyuwh/mcp-speech-to-text#readme) for complete documentation.
+        draft: false
+        prerelease: false
