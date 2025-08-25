@@ -1,7 +1,8 @@
 """
 Local Offline MCP Speech-to-Text Server
-Uses SpeechRecognition with offline capabilities
-No internet connection or API keys required for basic functionality
+Uses Vosk for completely local, offline speech recognition
+No internet connection or API keys required
+Optimized for x86_64 Linux production deployment
 """
 
 import asyncio
@@ -32,35 +33,47 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class OfflineSpeechToTextServer:
-    """MCP server for local speech-to-text using SpeechRecognition library"""
+    """MCP server for completely local/offline speech-to-text using Vosk"""
     
     def __init__(self):
         self.app = Server("mcp-speech-to-text")
-        self.speech_recognizer = None
+        self.vosk_model = None
+        self.vosk_rec = None
         self._setup_handlers()
-        self._initialize_speech_recognition()
+        self._initialize_vosk()
     
-    def _initialize_speech_recognition(self):
-        """Initialize SpeechRecognition library"""
+    def _initialize_vosk(self):
+        """Initialize Vosk offline speech recognition"""
         try:
-            import speech_recognition as sr
+            import vosk
             
-            self.speech_recognizer = sr.Recognizer()
+            # Check for models directory
+            models_dir = os.path.join(os.path.dirname(__file__), "models")
             
-            # Test microphone availability
-            try:
-                mic_list = sr.Microphone.list_microphone_names()
-                logger.info(f"Found {len(mic_list)} microphone(s)")
-            except Exception as e:
-                logger.warning(f"Could not enumerate microphones: {e}")
+            # Look for any vosk model
+            model_path = None
+            if os.path.exists(models_dir):
+                for item in os.listdir(models_dir):
+                    if item.startswith("vosk-model"):
+                        model_path = os.path.join(models_dir, item)
+                        break
             
-            logger.info("SpeechRecognition initialized successfully")
-            logger.info("Available engines: Google (offline), Sphinx (offline), macOS built-in")
+            if not model_path:
+                logger.warning("No Vosk model found. Please download a model:")
+                logger.info("wget https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip")
+                logger.info("unzip vosk-model-en-us-0.22.zip -d src/mcp_speech_to_text/models/")
+                return
+            
+            logger.info(f"Loading Vosk model from: {model_path}")
+            self.vosk_model = vosk.Model(model_path)
+            self.vosk_rec = vosk.KaldiRecognizer(self.vosk_model, 16000)
+            
+            logger.info("Vosk offline speech recognition initialized successfully")
             
         except ImportError:
-            logger.error("SpeechRecognition library not installed. Install with: uv add SpeechRecognition")
+            logger.error("Vosk library not installed. Install with: pip install vosk")
         except Exception as e:
-            logger.error(f"Failed to initialize SpeechRecognition: {e}")
+            logger.error(f"Failed to initialize Vosk: {e}")
     
     def _setup_handlers(self):
         """Setup MCP message handlers"""
@@ -90,7 +103,7 @@ class OfflineSpeechToTextServer:
                             },
                             "model_language": {
                                 "type": "string", 
-                                "description": "Model language hint (en, zh, fr, etc.) - informational only",
+                                "description": "Model language hint (en, zh, fr, etc.)",
                                 "default": "en"
                             }
                         },
@@ -103,11 +116,21 @@ class OfflineSpeechToTextServer:
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "input_path": {"type": "string", "description": "Input audio file path"},
-                            "output_path": {"type": "string", "description": "Output WAV file path"},
-                            "sample_rate": {"type": "number", "description": "Sample rate (16000 recommended)", "default": 16000}
+                            "input_path": {
+                                "type": "string",
+                                "description": "Path to input audio file"
+                            },
+                            "output_path": {
+                                "type": "string",
+                                "description": "Path for output WAV file (optional)"
+                            },
+                            "sample_rate": {
+                                "type": "integer",
+                                "description": "Sample rate for output (default: 16000)",
+                                "default": 16000
+                            }
                         },
-                        "required": ["input_path", "output_path"]
+                        "required": ["input_path"]
                     }
                 ),
                 Tool(
@@ -116,10 +139,18 @@ class OfflineSpeechToTextServer:
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "duration": {"type": "number", "description": "Recording duration in seconds"},
-                            "output_file": {"type": "string", "description": "Optional: save recording to file", "default": ""}
+                            "duration": {
+                                "type": "number",
+                                "description": "Recording duration in seconds",
+                                "default": 5
+                            },
+                            "sample_rate": {
+                                "type": "integer",
+                                "description": "Sample rate for recording",
+                                "default": 16000
+                            }
                         },
-                        "required": ["duration"]
+                        "required": []
                     }
                 ),
                 Tool(
@@ -128,25 +159,27 @@ class OfflineSpeechToTextServer:
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "language": {
-                                "type": "string", 
-                                "description": "Language code: en-us, en-small, zh, fr, de, es, etc.",
-                                "default": "en-us"
-                            },
-                            "model_size": {
+                            "model_name": {
                                 "type": "string",
-                                "description": "Model size: small, medium, large",
-                                "default": "small"
+                                "description": "Model name (small-en-us, large-en-us, etc.)",
+                                "default": "small-en-us"
+                            },
+                            "language": {
+                                "type": "string",
+                                "description": "Language code (en, zh, fr, etc.)",
+                                "default": "en"
                             }
                         },
                         "required": []
                     }
                 )
             ]
-        
+
         @self.app.call_tool()
         async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
             """Handle tool calls"""
+            logger.info(f"Tool called: {name} with arguments: {arguments}")
+            
             try:
                 if name == "get_supported_formats":
                     return await self._get_supported_formats()
@@ -195,7 +228,7 @@ class OfflineSpeechToTextServer:
                         "Or manually download from https://alphacephei.com/vosk/models/",
                         "Extract to src/mcp_speech_to_text/models/"
                     ]
-                })
+                }, indent=2)
             )]
         
         file_path = arguments.get("file_path")
@@ -224,7 +257,7 @@ class OfflineSpeechToTextServer:
                         text=json.dumps({
                             "error": "Audio conversion failed",
                             "message": "Could not convert audio to WAV format"
-                        })
+                        }, indent=2)
                     )]
             
             logger.info(f"Transcribing audio file offline: {wav_path}")
@@ -282,7 +315,7 @@ class OfflineSpeechToTextServer:
                 text=json.dumps({
                     "error": "Missing dependency",
                     "message": "Install Vosk: pip install vosk"
-                })
+                }, indent=2)
             )]
         except Exception as e:
             logger.error(f"Offline transcription error: {e}")
@@ -292,7 +325,7 @@ class OfflineSpeechToTextServer:
                     "error": "Transcription failed",
                     "message": str(e),
                     "service": "Vosk (Offline)"
-                })
+                }, indent=2)
             )]
     
     async def _convert_audio_format(self, arguments: dict) -> list[TextContent]:
@@ -301,35 +334,35 @@ class OfflineSpeechToTextServer:
         output_path = arguments.get("output_path")
         sample_rate = arguments.get("sample_rate", 16000)
         
-        if not os.path.exists(input_path):
-            raise FileNotFoundError(f"Input file not found: {input_path}")
+        if not output_path:
+            name, ext = os.path.splitext(input_path)
+            output_path = f"{name}_converted.wav"
         
         try:
             from pydub import AudioSegment
             
-            logger.info(f"Converting {input_path} to WAV format")
+            logger.info(f"Converting {input_path} to {output_path}")
             
             # Load audio file
             audio = AudioSegment.from_file(input_path)
             
-            # Convert to optimal format for Vosk (16kHz, mono, 16-bit)
-            audio = audio.set_frame_rate(sample_rate).set_channels(1).set_sample_width(2)
+            # Convert to mono and set sample rate
+            audio = audio.set_channels(1)
+            audio = audio.set_frame_rate(sample_rate)
             
             # Export as WAV
             audio.export(output_path, format="wav")
             
             result = {
-                "success": True,
+                "status": "success",
                 "input_path": input_path,
                 "output_path": output_path,
-                "format": "WAV",
                 "sample_rate": sample_rate,
                 "channels": 1,
-                "bit_depth": 16,
-                "optimized_for": "Vosk offline recognition",
-                "message": "Successfully converted to Vosk-compatible WAV format"
+                "format": "wav"
             }
             
+            logger.info(f"Audio conversion completed: {output_path}")
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
         except ImportError:
@@ -338,60 +371,56 @@ class OfflineSpeechToTextServer:
                 text=json.dumps({
                     "error": "Missing dependency",
                     "message": "Install pydub: pip install pydub"
-                })
+                }, indent=2)
             )]
         except Exception as e:
-            logger.error(f"Audio conversion failed: {e}")
-            raise Exception(f"Audio conversion failed: {e}")
+            logger.error(f"Audio conversion error: {e}")
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "error": "Conversion failed",
+                    "message": str(e)
+                }, indent=2)
+            )]
     
     async def _record_and_transcribe_offline(self, arguments: dict) -> list[TextContent]:
-        """Record audio and transcribe using Vosk offline"""
-        duration = arguments.get("duration", 5.0)
-        output_file = arguments.get("output_file", "")
+        """Record audio and transcribe using Vosk"""
+        duration = arguments.get("duration", 5)
+        sample_rate = arguments.get("sample_rate", 16000)
         
-        if not self.vosk_model:
+        if not self.vosk_model or not self.vosk_rec:
             return [TextContent(
                 type="text",
                 text=json.dumps({
                     "error": "Vosk model not loaded",
                     "message": "Please download a Vosk model first"
-                })
+                }, indent=2)
             )]
         
         try:
             import pyaudio
             import vosk
             
-            # Audio recording parameters
-            CHUNK = 4000
-            FORMAT = pyaudio.paInt16
-            CHANNELS = 1
-            RATE = 16000
+            logger.info(f"Recording audio for {duration} seconds...")
             
-            # Initialize audio
+            # Setup audio recording
             p = pyaudio.PyAudio()
+            stream = p.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=sample_rate,
+                input=True,
+                frames_per_buffer=4000
+            )
             
-            # Create recognizer
-            rec = vosk.KaldiRecognizer(self.vosk_model, RATE)
+            # Reset recognizer
+            rec = vosk.KaldiRecognizer(self.vosk_model, sample_rate)
             
-            logger.info(f"Recording for {duration} seconds...")
-            
-            # Start recording
-            stream = p.open(format=FORMAT,
-                          channels=CHANNELS,
-                          rate=RATE,
-                          input=True,
-                          frames_per_buffer=CHUNK)
-            
-            frames = []
             results = []
+            frames_to_record = int(sample_rate / 4000 * duration)
             
-            # Record audio in chunks and transcribe in real-time
-            for i in range(0, int(RATE / CHUNK * duration)):
-                data = stream.read(CHUNK)
-                frames.append(data)
-                
-                # Process with Vosk
+            for _ in range(frames_to_record):
+                data = stream.read(4000)
                 if rec.AcceptWaveform(data):
                     result = json.loads(rec.Result())
                     if result.get('text'):
@@ -402,158 +431,138 @@ class OfflineSpeechToTextServer:
             if final_result.get('text'):
                 results.append(final_result['text'])
             
-            # Stop recording
+            # Cleanup
             stream.stop_stream()
             stream.close()
             p.terminate()
             
-            # Save recording if requested
-            if output_file:
-                import wave
-                wf = wave.open(output_file, 'wb')
-                wf.setnchannels(CHANNELS)
-                wf.setsampwidth(p.get_sample_size(FORMAT))
-                wf.setframerate(RATE)
-                wf.writeframes(b''.join(frames))
-                wf.close()
+            transcription = " ".join(results).strip()
             
-            # Combine results
-            full_transcription = " ".join(results).strip()
-            
-            result_data = {
-                "transcription": full_transcription,
+            result = {
+                "transcription": transcription,
                 "duration": duration,
+                "sample_rate": sample_rate,
                 "service": "Vosk (Offline Recording)",
-                "recording_saved": output_file if output_file else None,
-                "completely_local": True,
-                "no_internet_required": True,
-                "real_time_processing": True
+                "completely_local": True
             }
             
-            return [TextContent(type="text", text=json.dumps(result_data, indent=2))]
+            logger.info("Recording and transcription completed")
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
-        except ImportError:
+        except ImportError as e:
             return [TextContent(
                 type="text",
                 text=json.dumps({
                     "error": "Missing dependency",
-                    "message": "Install packages: pip install vosk pyaudio"
-                })
+                    "message": f"Install required packages: {e}"
+                }, indent=2)
             )]
         except Exception as e:
-            logger.error(f"Recording failed: {e}")
+            logger.error(f"Recording error: {e}")
             return [TextContent(
                 type="text",
                 text=json.dumps({
                     "error": "Recording failed",
-                    "message": str(e),
-                    "service": "Vosk (Offline)"
-                })
+                    "message": str(e)
+                }, indent=2)
             )]
     
     async def _download_vosk_model(self, arguments: dict) -> list[TextContent]:
-        """Download Vosk models for offline use"""
-        language = arguments.get("language", "en-us")
-        model_size = arguments.get("model_size", "small")
+        """Download Vosk model for offline recognition"""
+        model_name = arguments.get("model_name", "small-en-us")
+        language = arguments.get("language", "en")
         
         try:
             import urllib.request
             import zipfile
-            import shutil
             
-            # Model URLs (this is a simplified example)
+            # Model URLs (small selection of popular models)
             model_urls = {
-                "en-us-small": "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip",
+                "small-en-us": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip",
                 "en-us": "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip",
-                "zh": "https://alphacephei.com/vosk/models/vosk-model-cn-0.22.zip",
-                "fr": "https://alphacephei.com/vosk/models/vosk-model-fr-0.22.zip",
-                "de": "https://alphacephei.com/vosk/models/vosk-model-de-0.22.zip",
-                "es": "https://alphacephei.com/vosk/models/vosk-model-es-0.22.zip"
+                "small-zh": "https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip",
+                "small-fr": "https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip",
+                "small-de": "https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip",
+                "small-es": "https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"
             }
             
-            model_key = f"{language}-{model_size}" if f"{language}-{model_size}" in model_urls else language
-            
-            if model_key not in model_urls:
+            if model_name not in model_urls:
                 available_models = list(model_urls.keys())
                 return [TextContent(
                     type="text",
                     text=json.dumps({
-                        "error": "Model not available",
-                        "message": f"Model '{model_key}' not found",
+                        "error": f"Model '{model_name}' not available",
                         "available_models": available_models,
-                        "manual_download": "Visit https://alphacephei.com/vosk/models/ for more models"
-                    })
+                        "message": "Choose from available models"
+                    }, indent=2)
                 )]
             
-            url = model_urls[model_key]
+            url = model_urls[model_name]
             models_dir = os.path.join(os.path.dirname(__file__), "models")
             os.makedirs(models_dir, exist_ok=True)
             
-            zip_path = os.path.join(models_dir, f"{model_key}.zip")
-            
-            logger.info(f"Downloading Vosk model: {model_key}")
-            
             # Download model
+            zip_path = os.path.join(models_dir, f"{model_name}.zip")
+            logger.info(f"Downloading model from {url}")
+            
             urllib.request.urlretrieve(url, zip_path)
             
             # Extract model
-            logger.info("Extracting model...")
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(models_dir)
             
-            # Clean up zip file
+            # Remove zip file
             os.remove(zip_path)
             
             # Reinitialize Vosk with new model
             self._initialize_vosk()
             
             result = {
-                "success": True,
-                "model": model_key,
-                "location": models_dir,
-                "message": "Model downloaded and ready for offline use",
-                "next_step": "You can now use transcribe_audio_offline tool"
+                "status": "success",
+                "model_name": model_name,
+                "language": language,
+                "download_url": url,
+                "models_directory": models_dir,
+                "message": "Model downloaded and loaded successfully"
             }
             
+            logger.info(f"Model {model_name} downloaded successfully")
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
         except Exception as e:
-            logger.error(f"Model download failed: {e}")
+            logger.error(f"Model download error: {e}")
             return [TextContent(
                 type="text",
                 text=json.dumps({
                     "error": "Download failed",
                     "message": str(e),
-                    "manual_instructions": [
-                        "Visit https://alphacephei.com/vosk/models/",
-                        "Download a model ZIP file",
-                        "Extract to src/mcp_speech_to_text/models/",
-                        "Restart the server"
-                    ]
-                })
+                    "model_name": model_name
+                }, indent=2)
             )]
 
-    async def run(self):
+    async def run_server(self):
         """Run the MCP server"""
-        logger.info("Starting MCP Speech-to-Text Server v1.0.0 (Local/Offline)")
+        from mcp.server.stdio import stdio_server
         
-        # Initialize the server
-        async with self.app.stdio() as (read_stream, write_stream):
+        async with stdio_server() as (read_stream, write_stream):
             await self.app.run(
-                read_stream, write_stream, InitializationOptions(
+                read_stream,
+                write_stream,
+                InitializationOptions(
                     server_name="mcp-speech-to-text",
                     server_version="1.0.0",
                     capabilities=self.app.get_capabilities(
                         notification_options=NotificationOptions(),
-                        experimental_capabilities={}
-                    )
-                )
+                        experimental_capabilities={},
+                    ),
+                ),
             )
 
+# Entry point for running the server
 async def main():
     """Main entry point"""
     server = OfflineSpeechToTextServer()
-    await server.run()
+    await server.run_server()
 
 if __name__ == "__main__":
     asyncio.run(main())

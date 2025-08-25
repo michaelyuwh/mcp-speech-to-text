@@ -41,8 +41,10 @@ RUN echo "Building for platform: $TARGETPLATFORM" && \
     fi
 
 # Download Vosk model for x86_64 platforms where it's supported
-RUN mkdir -p src/mcp_speech_to_text/models && \
-    if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+RUN mkdir -p src/mcp_speech_to_text/models
+
+# Platform-specific model download using dpkg architecture detection
+RUN if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
         echo "Downloading Vosk model for x86_64 platform"; \
         cd src/mcp_speech_to_text/models && \
         wget -q https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip && \
@@ -65,7 +67,7 @@ ENV VOSK_MODEL_PATH=/app/src/mcp_speech_to_text/models
 
 # Platform-specific health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+    CMD if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
         python -c "import vosk; print('✅ Vosk available for x86_64')"; \
     else \
         python -c "import speech_recognition; print('✅ SpeechRecognition available')"; \
