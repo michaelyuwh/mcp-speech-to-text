@@ -1,28 +1,36 @@
 [project]
 name = "mcp-speech-to-text"
 version = "1.0.0"
-description = "MCP server for Speech-to-Text functionality"
+description = "Local offline MCP server for speech-to-text using Vosk - works anywhere, no API costs"
 authors = [
     {name = "Michael Yu", email = "michael@example.com"}
 ]
 dependencies = [
     "mcp>=1.0.0",
-    "speechrecognition>=3.10.0",
     "pyaudio>=0.2.11",
     "pydub>=0.25.1",
-    "openai-whisper>=20231117",
-    "torch>=2.0.0",
-    "torchaudio>=2.0.0",
     "ffmpeg-python>=0.2.0",
+    "speechrecognition>=3.14.3",
 ]
 readme = "README.md"
 license = {text = "MIT"}
+requires-python = ">=3.10"
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
     "black>=23.0.0",
     "mypy>=1.0.0",
+    "ruff>=0.1.0",
+]
+offline = [
+    "vosk>=0.3.44",
+]
+all = [
+    "vosk>=0.3.44",
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0", 
     "ruff>=0.1.0",
 ]
 
