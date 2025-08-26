@@ -20,8 +20,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir uv
 
 # Copy dependency files first (for better caching)
-COPY pyproject.toml README.md ./
-COPY src/ ./src/
+COPY pyproject.toml ./
 
 # Install dependencies based on architecture
 RUN if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
@@ -31,6 +30,9 @@ RUN if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
         echo "Installing without Vosk for non-x86_64"; \
         uv pip install --system -e . --no-cache; \
     fi
+
+# Copy source code
+COPY src/ ./src/
 
 # Download Vosk model only for x86_64
 RUN mkdir -p src/mcp_speech_to_text/models && \

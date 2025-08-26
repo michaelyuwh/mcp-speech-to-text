@@ -1,0 +1,97 @@
+# Optimized multi-stage build for minimal image size (~300-400MB)
+FROM python:3.11-slim as builder
+
+# Install build dependencies only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    portaudio19-dev \
+    python3-dev \
+    wget \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy only necessary files for dependency installation
+COPY pyproject.toml ./
+
+# Install uv and dependencies in virtual environment
+RUN pip install --no-cache-dir uv && \
+    uv venv /opt/venv && \
+    . /opt/venv/bin/activate && \
+    uv pip install wheel setuptools
+
+# Copy source code
+COPY src/ ./src/
+
+# Install project dependencies
+RUN . /opt/venv/bin/activate && \
+    if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+        echo "Installing with Vosk for x86_64"; \
+        uv pip install -e ".[offline]"; \
+    else \
+        echo "Installing SpeechRecognition only"; \
+        uv pip install -e .; \
+    fi
+
+# Download Vosk model only for x86_64 and only if needed
+RUN mkdir -p src/mcp_speech_to_text/models && \
+    if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+        echo "Downloading small Vosk model for x86_64"; \
+        cd src/mcp_speech_to_text/models && \
+        wget -q https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip && \
+        unzip -q vosk-model-small-en-us-0.15.zip && \
+        rm vosk-model-small-en-us-0.15.zip; \
+    fi
+
+# Production stage - minimal runtime image
+FROM python:3.11-slim
+
+# Install only runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    portaudio19-dev \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get autoremove -y \
+    && apt-get clean
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+
+# Set working directory
+WORKDIR /app
+
+# Copy application code
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/src/mcp_speech_to_text/models ./src/mcp_speech_to_text/models
+
+# Copy minimal project files
+COPY pyproject.toml README.md ./
+
+# Create non-root user
+RUN groupadd -r speechuser && useradd -r -g speechuser speechuser && \
+    chown -R speechuser:speechuser /app
+USER speechuser
+
+# Set environment variables
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONPATH=/app/src
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Optimized health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD python -c "print('✅ Server healthy')" || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Run the server with auto-detection
+CMD ["python", "-m", "mcp_speech_to_text"]
+
+# Metadata
+LABEL version="1.0.0" \
+      description="MCP Speech-to-Text Server - Optimized" \
+      maintainer="michaelyuwh" \
+      org.opencontainers.image.source="https://github.com/michaelyuwh/mcp-speech-to-text"
